@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Map as LeafletMap, GeoJSON as LeafletGeoJSON, PathOptions, Layer, Path } from 'leaflet'
 import turfArea from '@turf/area'
+import { filterBusinessesInParcel, type Business } from '@/lib/businesses'
+import BusinessPanel from './BusinessPanel'
 
 const YEARS = [
   { year: 1998, file: '1998' },
@@ -69,16 +71,42 @@ export default function MapView() {
   const [totalAcres, setTotalAcres] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const historyOpenRef = useRef(false)
+  const businessesRef = useRef<Business[] | null>(null)
+  const businessFetched = useRef(false)
+  const [businessLoading, setBusinessLoading] = useState(false)
+  const [selectedBusinesses, setSelectedBusinesses] = useState<Business[] | null>(null)
+  const [selectedParcelLabel, setSelectedParcelLabel] = useState('')
+
+  // Keep historyOpenRef current so Leaflet click handlers (stale closures) can read it
+  useEffect(() => {
+    historyOpenRef.current = historyOpen
+  }, [historyOpen])
+
+  // Prefetch business data when entering current view
+  useEffect(() => {
+    if (historyOpen) return
+    if (businessFetched.current) return
+    businessFetched.current = true
+    setBusinessLoading(true)
+    fetch('/api/businesses')
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<Business[]> })
+      .then(data => { businessesRef.current = data })
+      .catch(() => { businessFetched.current = false })
+      .finally(() => setBusinessLoading(false))
+  }, [historyOpen])
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
 
     let cancelled = false
 
-    const onDocClick = () => {
+    const onDocClick = (e: MouseEvent) => {
+      if ((e.target as Element).closest('[data-business-panel]')) return
       if (!featureWasClickedRef.current && selectedFeatureRef.current) {
         ;(selectedFeatureRef.current as unknown as Path).setStyle(defaultStyleRef.current)
         selectedFeatureRef.current = null
+        setSelectedBusinesses(null)
       }
       featureWasClickedRef.current = false
     }
@@ -99,6 +127,8 @@ export default function MapView() {
         center: [37.758, -122.44],
         zoom: 12,
         zoomControl: true,
+        zoomSnap: 0.5,
+        zoomDelta: 0.25,
       })
 
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -141,6 +171,7 @@ export default function MapView() {
     async function loadLayer() {
       setLoading(true)
       selectedFeatureRef.current = null
+      setSelectedBusinesses(null)
       try {
         const [mod, res] = await Promise.all([
           import('leaflet'),
@@ -174,29 +205,48 @@ export default function MapView() {
 
             lyr.on('click', () => {
               featureWasClickedRef.current = true
+              const wasSelected = selectedFeatureRef.current === lyr
+
               if (selectedFeatureRef.current && selectedFeatureRef.current !== lyr) {
                 ;(selectedFeatureRef.current as unknown as Path).setStyle(style)
               }
-              if (selectedFeatureRef.current === lyr) {
+              if (wasSelected) {
                 // Deselect on second click
                 ;(lyr as unknown as Path).setStyle(style)
                 selectedFeatureRef.current = null
+                setSelectedBusinesses(null)
               } else {
                 ;(lyr as unknown as Path).setStyle({
                   ...SELECTED_STYLE,
                   weight: isParcelLevel ? 1.5 : 2.5,
                 })
                 selectedFeatureRef.current = lyr
+
+                // Show business panel in current view only
+                if (!historyOpenRef.current) {
+                  setSelectedParcelLabel(label)
+                  if (businessesRef.current) {
+                    setSelectedBusinesses(
+                      filterBusinessesInParcel(
+                        businessesRef.current,
+                        feature as Parameters<typeof filterBusinessesInParcel>[1]
+                      )
+                    )
+                  } else {
+                    // Data still loading — show panel with loading state
+                    setSelectedBusinesses([])
+                  }
+                }
               }
             })
           },
         }).addTo(map)
 
-        type Feature = { geometry: unknown; properties: Record<string, string> }
+        type GeoFeature = { geometry: unknown; properties: Record<string, string> }
 
         // Deduplicate by parcel ID for both count and area — keeps first occurrence only
         const seenIds = new Set<string>()
-        const uniqueFeatures = (geojson.features as Feature[]).filter((f) => {
+        const uniqueFeatures = (geojson.features as GeoFeature[]).filter((f) => {
           const id = f.properties.mapblklot || f.properties.blklot
           if (!id) return true
           if (seenIds.has(id)) return false
@@ -248,6 +298,16 @@ export default function MapView() {
           </svg>
           See Changes Over Time
         </button>
+
+        {/* Business info panel — slides in from right when a parcel is selected in current view */}
+        {selectedBusinesses !== null && (
+          <BusinessPanel
+            businesses={selectedBusinesses}
+            parcelLabel={selectedParcelLabel}
+            loading={businessLoading}
+            onClose={() => setSelectedBusinesses(null)}
+          />
+        )}
 
         {/* History drawer — absolute overlay sliding up from the bottom */}
         <div
