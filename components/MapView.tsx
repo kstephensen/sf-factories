@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Map as LeafletMap, GeoJSON as LeafletGeoJSON, PathOptions, Layer, Path } from 'leaflet'
+import turfArea from '@turf/area'
 
 const YEARS = [
   { year: 1998, file: '1998' },
@@ -63,6 +64,7 @@ export default function MapView() {
   const [mapReady, setMapReady] = useState(false)
   const [yearIndex, setYearIndex] = useState(0)
   const [featureCount, setFeatureCount] = useState<number | null>(null)
+  const [totalAcres, setTotalAcres] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -173,8 +175,23 @@ export default function MapView() {
           },
         }).addTo(map)
 
+        type Feature = { geometry: unknown; properties: Record<string, string> }
+
+        // Deduplicate by parcel ID for both count and area — keeps first occurrence only
+        const seenIds = new Set<string>()
+        const uniqueFeatures = (geojson.features as Feature[]).filter((f) => {
+          const id = f.properties.mapblklot || f.properties.blklot
+          if (!id) return true
+          if (seenIds.has(id)) return false
+          seenIds.add(id)
+          return true
+        })
+
         layerRef.current = layer
-        setFeatureCount(geojson.features.length)
+        setFeatureCount(uniqueFeatures.length)
+        const featuresWithGeometry = uniqueFeatures.filter((f) => f.geometry != null)
+        const sqMeters = turfArea({ ...geojson, features: featuresWithGeometry })
+        setTotalAcres(sqMeters / 4046.856)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -232,13 +249,23 @@ export default function MapView() {
               </span>
             </div>
             {featureCount !== null && (
-              <div className="text-right shrink-0">
-                <span className="text-lg font-semibold tabular-nums text-zinc-800">
-                  {featureCount.toLocaleString()}
-                </span>
-                <span className="text-xs text-zinc-400 ml-1.5">
-                  {isParcelLevel ? 'parcels' : 'districts'}
-                </span>
+              <div className="text-right shrink-0 flex items-baseline gap-4">
+                <div>
+                  <span className="text-lg font-semibold tabular-nums text-zinc-800">
+                    {featureCount.toLocaleString()}
+                  </span>
+                  <span className="text-xs text-zinc-400 ml-1.5">
+                    {isParcelLevel ? 'parcels' : 'districts'}
+                  </span>
+                </div>
+                {totalAcres !== null && (
+                  <div>
+                    <span className="text-lg font-semibold tabular-nums text-zinc-800">
+                      {Math.round(totalAcres).toLocaleString()}
+                    </span>
+                    <span className="text-xs text-zinc-400 ml-1.5">acres</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
