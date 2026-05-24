@@ -4,16 +4,40 @@ import { useEffect, useRef, useState } from 'react'
 import type { Map as LeafletMap, GeoJSON as LeafletGeoJSON, PathOptions } from 'leaflet'
 
 const YEARS = [
-  { label: '1998', file: '1998', description: 'Dot-com era — M-1/M-2 industrial districts' },
-  { label: '2009', file: '2009', description: 'Post-Eastern Neighborhoods plan — PDR zones introduced' },
-  { label: '2015', file: '2015', description: 'Mid-decade — PDR consolidation' },
-  { label: 'Today', file: 'current', description: 'Current zoning (PDR + legacy M-1/M-2)' },
+  { year: 1998, file: '1998' },
+  { year: 2000, file: '2000' },
+  { year: 2001, file: '2001' },
+  { year: 2002, file: '2002' },
+  { year: 2003, file: '2003' },
+  { year: 2004, file: '2004' },
+  { year: 2005, file: '2005' },
+  { year: 2006, file: '2006' },
+  { year: 2007, file: '2007' },
+  { year: 2008, file: '2008' },
+  { year: 2009, file: '2009' },
+  { year: 2010, file: '2010' },
+  { year: 2011, file: '2011' },
+  { year: 2012, file: '2012' },
+  { year: 2013, file: '2013' },
+  { year: 2014, file: '2014' },
+  { year: 2015, file: '2015' },
+  { year: 2024, file: 'current' },
 ] as const
+
+
+function getDescription(year: number): string {
+  if (year <= 2003) return 'Dot-com era — parcel-level M-1/M-2 industrial zones'
+  if (year <= 2005) return 'Eastern Neighborhoods planning begins'
+  if (year <= 2008) return 'Eastern Neighborhoods plan in development'
+  if (year === 2009) return 'Eastern Neighborhoods Plan adopted — PDR zones take effect'
+  if (year <= 2014) return 'PDR consolidation — district-level industrial protection'
+  if (year === 2015) return 'Post-Eastern Neighborhoods — stabilized PDR districts'
+  return 'Today — current PDR + legacy M-1/M-2 zoning'
+}
 
 const FILL_COLOR = '#e05533'
 const FILL_OPACITY = 0.55
 const STROKE_COLOR = '#b03a1e'
-const STROKE_WEIGHT = 0.8
 
 export default function MapView() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -34,7 +58,6 @@ export default function MapView() {
       if (cancelled || !containerRef.current) return
       const L = mod.default
 
-      // Fix default icon paths broken by bundlers — must cast through unknown
       delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -56,19 +79,17 @@ export default function MapView() {
       }).addTo(map)
 
       mapRef.current = map
-      setMapReady(true) // triggers the layer-loading effect
+      setMapReady(true)
     })
 
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
-  // Load and swap GeoJSON layer when year changes or map becomes ready
+  // Load and swap GeoJSON layer when year or map readiness changes
   useEffect(() => {
     if (!mapReady || !mapRef.current) return
 
-    const file = YEARS[yearIndex].file
+    const { file, year } = YEARS[yearIndex]
     let cancelled = false
 
     async function loadLayer() {
@@ -86,13 +107,13 @@ export default function MapView() {
         const geojson = await res.json()
         if (cancelled) return
 
-        if (layerRef.current) {
-          map.removeLayer(layerRef.current)
-        }
+        if (layerRef.current) map.removeLayer(layerRef.current)
 
+        // Pre-2010 datasets are parcel-level (many small polygons), use thinner strokes
+        const isParcelLevel = year < 2010
         const style: PathOptions = {
           color: STROKE_COLOR,
-          weight: STROKE_WEIGHT,
+          weight: isParcelLevel ? 0.4 : 0.8,
           fillColor: FILL_COLOR,
           fillOpacity: FILL_OPACITY,
         }
@@ -114,71 +135,71 @@ export default function MapView() {
     }
 
     loadLayer()
-
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [yearIndex, mapReady])
 
-  const year = YEARS[yearIndex]
+  const { year } = YEARS[yearIndex]
+  const label = year === 2024 ? 'Today' : String(year)
 
   return (
     <div className="flex flex-col" style={{ height: '100%' }}>
-      {/* Map — absolute fill so Leaflet gets a real pixel height */}
+      {/* Map */}
       <div className="relative flex-1 min-h-0">
         <div ref={containerRef} className="absolute inset-0" />
         {loading && (
-          <div className="absolute top-3 right-3 z-[1000] bg-white/90 rounded px-3 py-1 text-sm shadow">
+          <div className="absolute top-3 right-3 z-1000 bg-white/90 rounded px-3 py-1 text-sm shadow">
             Loading…
           </div>
         )}
       </div>
 
       {/* Controls */}
-      <div className="bg-white border-t px-6 py-4 flex flex-col gap-3 shrink-0">
+      <div className="bg-white border-t px-6 py-4 flex flex-col gap-2 shrink-0">
         <div className="flex items-baseline justify-between">
-          <span className="text-2xl font-semibold tabular-nums">{year.label}</span>
+          <span className="text-2xl font-semibold tabular-nums">{label}</span>
           <span className="text-sm text-zinc-500">
-            {featureCount !== null ? `${featureCount} industrial parcels` : ''}
+            {featureCount !== null ? `${featureCount.toLocaleString()} industrial features` : ''}
           </span>
         </div>
 
-        <p className="text-sm text-zinc-600 -mt-1">{year.description}</p>
+        <p className="text-sm text-zinc-500">{getDescription(year)}</p>
 
-        <input
-          type="range"
-          min={0}
-          max={YEARS.length - 1}
-          step={1}
-          value={yearIndex}
-          onChange={e => setYearIndex(Number(e.target.value))}
-          className="w-full accent-[#e05533] cursor-pointer"
-        />
-
-        <div className="flex justify-between text-xs text-zinc-400 -mt-1">
-          {YEARS.map((y, i) => (
-            <button
-              key={y.file}
-              onClick={() => setYearIndex(i)}
-              className={`transition-colors ${i === yearIndex ? 'text-zinc-900 font-medium' : 'hover:text-zinc-700'}`}
-            >
-              {y.label}
-            </button>
-          ))}
+        {/* Slider */}
+        <div className="pt-1">
+          <input
+            type="range"
+            min={0}
+            max={YEARS.length - 1}
+            step={1}
+            value={yearIndex}
+            onChange={e => setYearIndex(Number(e.target.value))}
+            className="w-full accent-[#e05533] cursor-pointer"
+          />
+          {/* Tick labels — every other year */}
+          <div className="relative h-5 mt-1">
+            {YEARS.map(({ year: y }, i) => {
+              if (i % 2 !== 0 && i !== YEARS.length - 1) return null
+              const pct = (i / (YEARS.length - 1)) * 100
+              const tickLabel = y === 2024 ? 'Today' : String(y)
+              return (
+                <button
+                  key={y}
+                  onClick={() => setYearIndex(i)}
+                  style={{ left: `${pct}%`, transform: 'translateX(-50%)' }}
+                  className={`absolute text-xs whitespace-nowrap transition-colors ${
+                    i === yearIndex ? 'text-zinc-900 font-medium' : 'text-zinc-400 hover:text-zinc-600'
+                  }`}
+                >
+                  {tickLabel}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         <p className="text-xs text-zinc-400 border-t pt-2 mt-1">
-          This map shows zoning districts, not actual factory locations or jobs.
-          Data:{' '}
-          <a
-            href="https://data.sfgov.org"
-            className="underline hover:text-zinc-600"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            DataSF
-          </a>
-          .
+          Note: pre-2010 data is parcel-level (individual lots); 2010+ is district-level (PDR zones). Both show industrial-designated land.{' '}
+          Data: <a href="https://data.sfgov.org" className="underline hover:text-zinc-600" target="_blank" rel="noopener noreferrer">DataSF</a>.
         </p>
       </div>
     </div>
