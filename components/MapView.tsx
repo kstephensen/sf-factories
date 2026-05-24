@@ -61,11 +61,14 @@ export default function MapView() {
   const selectedFeatureRef = useRef<Layer | null>(null)
   const defaultStyleRef = useRef<PathOptions>({})
   const featureWasClickedRef = useRef(false)
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const drawerPanRef = useRef(0)
   const [mapReady, setMapReady] = useState(false)
-  const [yearIndex, setYearIndex] = useState(0)
+  const [yearIndex, setYearIndex] = useState(YEARS.length - 1)
   const [featureCount, setFeatureCount] = useState<number | null>(null)
   const [totalAcres, setTotalAcres] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -114,6 +117,20 @@ export default function MapView() {
       document.removeEventListener('click', onDocClick)
     }
   }, [])
+
+  useEffect(() => {
+    if (!mapRef.current) return
+    const map = mapRef.current
+    if (historyOpen) {
+      const height = drawerRef.current?.offsetHeight ?? 0
+      const panY = Math.round(height / 2)
+      drawerPanRef.current = panY
+      map.panBy([0, panY], { animate: true, duration: 0.3 })
+    } else if (drawerPanRef.current) {
+      map.panBy([0, -drawerPanRef.current], { animate: true, duration: 0.3 })
+      drawerPanRef.current = 0
+    }
+  }, [historyOpen])
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return
@@ -208,7 +225,7 @@ export default function MapView() {
 
   return (
     <div className="flex flex-col" style={{ height: '100%' }}>
-      {/* Map */}
+      {/* Map — fills all available space */}
       <div className="relative flex-1 min-h-0">
         <div ref={containerRef} className="absolute inset-0" />
 
@@ -217,129 +234,165 @@ export default function MapView() {
             Loading…
           </div>
         )}
-      </div>
 
-      {/* Controls */}
-      <div className="bg-white border-t border-zinc-200 shrink-0">
-        {/* Era color bar */}
-        <div className="h-1 w-full transition-colors duration-300" style={{ background: era.color }} />
+        {/* Floating "See Changes Over Time" button — top-right */}
+        <button
+          onClick={() => setHistoryOpen(true)}
+          className={`absolute top-3 right-3 z-1000 flex items-center gap-1.5 bg-white border border-zinc-200 shadow-md rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 hover:text-zinc-800 transition-all duration-200 ${
+            historyOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          See Changes Over Time
+        </button>
 
-        <div className="px-6 py-4 flex flex-col gap-3">
-          {/* Year + era + count row */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-baseline gap-3">
-              <span className="text-3xl font-bold tabular-nums tracking-tight text-zinc-900">
-                {displayYear}
-              </span>
-              <span
-                className="text-xs font-medium px-2 py-0.5 rounded-full"
-                style={{ background: era.bg, color: era.text }}
-              >
-                {era.name}
-              </span>
-              <span
-                className="text-xs px-2 py-0.5 rounded-full border"
-                style={{
-                  color: isParcelLevel ? '#92400e' : '#1e40af',
-                  background: isParcelLevel ? '#fef3c7' : '#dbeafe',
-                  borderColor: isParcelLevel ? '#fde68a' : '#bfdbfe',
-                }}
-              >
-                {isParcelLevel ? 'Parcel-level' : 'District-level'}
-              </span>
-            </div>
-            {featureCount !== null && (
-              <div className="text-right shrink-0 flex items-baseline gap-4">
-                <div>
-                  <span className="text-lg font-semibold tabular-nums text-zinc-800">
-                    {featureCount.toLocaleString()}
-                  </span>
-                  <span className="text-xs text-zinc-400 ml-1.5">
-                    {isParcelLevel ? 'parcels' : 'districts'}
-                  </span>
-                </div>
-                {totalAcres !== null && (
+        {/* History drawer — absolute overlay sliding up from the bottom */}
+        <div
+          ref={drawerRef}
+          className={`absolute inset-x-0 bottom-0 z-1001 bg-white border-t border-zinc-200 shadow-xl transition-transform duration-300 ease-in-out ${
+            historyOpen ? 'translate-y-0' : 'translate-y-full'
+          }`}
+        >
+          {/* Drawer header */}
+          <div className="px-6 pt-4 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
+              History
+            </span>
+            <button
+              onClick={() => {
+                setHistoryOpen(false)
+                setYearIndex(YEARS.length - 1)
+              }}
+              className="text-zinc-400 hover:text-zinc-700 transition-colors text-xl leading-none"
+              aria-label="Close history"
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Era color bar */}
+          <div className="h-1 w-full mt-3 transition-colors duration-300" style={{ background: era.color }} />
+
+          <div className="px-6 py-4 flex flex-col gap-3">
+            {/* Year + era + count row */}
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-baseline gap-3">
+                <span className="text-3xl font-bold tabular-nums tracking-tight text-zinc-900">
+                  {displayYear}
+                </span>
+                <span
+                  className="text-xs font-medium px-2 py-0.5 rounded-full"
+                  style={{ background: era.bg, color: era.text }}
+                >
+                  {era.name}
+                </span>
+                <span
+                  className="text-xs px-2 py-0.5 rounded-full border"
+                  style={{
+                    color: isParcelLevel ? '#92400e' : '#1e40af',
+                    background: isParcelLevel ? '#fef3c7' : '#dbeafe',
+                    borderColor: isParcelLevel ? '#fde68a' : '#bfdbfe',
+                  }}
+                >
+                  {isParcelLevel ? 'Parcel-level' : 'District-level'}
+                </span>
+              </div>
+              {featureCount !== null && (
+                <div className="text-right shrink-0 flex items-baseline gap-4">
                   <div>
                     <span className="text-lg font-semibold tabular-nums text-zinc-800">
-                      {Math.round(totalAcres).toLocaleString()}
+                      {featureCount.toLocaleString()}
                     </span>
-                    <span className="text-xs text-zinc-400 ml-1.5">acres</span>
+                    <span className="text-xs text-zinc-400 ml-1.5">
+                      {isParcelLevel ? 'parcels' : 'districts'}
+                    </span>
                   </div>
-                )}
+                  {totalAcres !== null && (
+                    <div>
+                      <span className="text-lg font-semibold tabular-nums text-zinc-800">
+                        {Math.round(totalAcres).toLocaleString()}
+                      </span>
+                      <span className="text-xs text-zinc-400 ml-1.5">acres</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Description */}
+            <p className="text-sm text-zinc-600 leading-relaxed -mt-1">
+              {getDescription(year)}
+            </p>
+
+            {/* Slider */}
+            <div className="pt-1">
+              <input
+                type="range"
+                min={0}
+                max={YEARS.length - 1}
+                step={1}
+                value={yearIndex}
+                onChange={e => setYearIndex(Number(e.target.value))}
+                className="w-full cursor-pointer"
+                style={{ accentColor: era.color }}
+              />
+              {/* Tick labels */}
+              <div className="relative h-5 mt-0.5">
+                {YEARS.map(({ year: y }, i) => {
+                  if (i % 2 !== 0 && i !== YEARS.length - 1) return null
+                  const pct = (i / (YEARS.length - 1)) * 100
+                  const tickLabel = y === 2024 ? 'Today' : String(y)
+                  return (
+                    <button
+                      key={y}
+                      onClick={() => setYearIndex(i)}
+                      style={{
+                        left: `${pct}%`,
+                        transform: 'translateX(-50%)',
+                        color: i === yearIndex ? era.color : undefined,
+                      }}
+                      className={`absolute text-[11px] whitespace-nowrap transition-colors ${
+                        i === yearIndex ? 'font-semibold' : 'text-zinc-400 hover:text-zinc-600'
+                      }`}
+                    >
+                      {tickLabel}
+                    </button>
+                  )
+                })}
               </div>
+            </div>
+
+            {/* Footer: legend swatch + source */}
+            <div className="flex items-center justify-between border-t border-zinc-100 pt-2.5 mt-0.5">
+              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <span
+                  className="inline-block w-4 h-3 rounded-sm shrink-0"
+                  style={{ background: FILL_COLOR, opacity: 0.75, outline: `1px solid ${STROKE_COLOR}` }}
+                />
+                <span>
+                  {isParcelLevel ? 'M-1 / M-2 industrial zones (parcel boundaries)' : 'PDR districts — Production, Distribution & Repair'}
+                </span>
+              </div>
+              <a
+                href="https://data.sfgov.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-zinc-400 hover:text-zinc-700 transition-colors shrink-0 ml-4 underline underline-offset-2"
+              >
+                Source: DataSF
+              </a>
+            </div>
+
+            {/* Parcel-to-district transition note */}
+            {year === 2009 && (
+              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2 leading-relaxed">
+                <strong>Note:</strong> Starting in 2009, data switches from individual parcel records to district-level zones. The drop in feature count reflects this change in data type, not a loss of industrial land.
+              </p>
             )}
           </div>
-
-          {/* Description */}
-          <p className="text-sm text-zinc-600 leading-relaxed -mt-1">
-            {getDescription(year)}
-          </p>
-
-          {/* Slider */}
-          <div className="pt-1">
-            <input
-              type="range"
-              min={0}
-              max={YEARS.length - 1}
-              step={1}
-              value={yearIndex}
-              onChange={e => setYearIndex(Number(e.target.value))}
-              className="w-full cursor-pointer"
-              style={{ accentColor: era.color }}
-            />
-            {/* Tick labels */}
-            <div className="relative h-5 mt-0.5">
-              {YEARS.map(({ year: y }, i) => {
-                if (i % 2 !== 0 && i !== YEARS.length - 1) return null
-                const pct = (i / (YEARS.length - 1)) * 100
-                const tickLabel = y === 2024 ? 'Today' : String(y)
-                return (
-                  <button
-                    key={y}
-                    onClick={() => setYearIndex(i)}
-                    style={{
-                      left: `${pct}%`,
-                      transform: 'translateX(-50%)',
-                      color: i === yearIndex ? era.color : undefined,
-                    }}
-                    className={`absolute text-[11px] whitespace-nowrap transition-colors ${
-                      i === yearIndex ? 'font-semibold' : 'text-zinc-400 hover:text-zinc-600'
-                    }`}
-                  >
-                    {tickLabel}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Footer: legend swatch + source */}
-          <div className="flex items-center justify-between border-t border-zinc-100 pt-2.5 mt-0.5">
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
-              <span
-                className="inline-block w-4 h-3 rounded-sm shrink-0"
-                style={{ background: FILL_COLOR, opacity: 0.75, outline: `1px solid ${STROKE_COLOR}` }}
-              />
-              <span>
-                {isParcelLevel ? 'M-1 / M-2 industrial zones (parcel boundaries)' : 'PDR districts — Production, Distribution & Repair'}
-              </span>
-            </div>
-            <a
-              href="https://data.sfgov.org"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-zinc-400 hover:text-zinc-700 transition-colors shrink-0 ml-4 underline underline-offset-2"
-            >
-              Source: DataSF
-            </a>
-          </div>
-
-          {/* Parcel-to-district transition note */}
-          {year === 2009 && (
-            <p className="text-xs text-sky-700 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2 leading-relaxed">
-              <strong>Note:</strong> Starting in 2009, data switches from individual parcel records to district-level zones. The drop in feature count reflects this change in data type, not a loss of industrial land.
-            </p>
-          )}
         </div>
       </div>
     </div>
